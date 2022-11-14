@@ -1,10 +1,12 @@
+import random
 import threading
 from time import sleep
 import numpy as np
+from itertools import count
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Cursor
+from matplotlib.animation import FuncAnimation
 ######################################################
-
 
 class Motor (threading.Thread):
     def __init__(self):
@@ -19,23 +21,28 @@ class Motor (threading.Thread):
         self.Km = 1  # torque constant
         self.Tm = 0  # motor's torque current value
         self.TL = 0  # load torque (disturbance)
-        self.Jm = 0.05  # moment of inertia - slows the system dynamics down - time constant must be 10 times bigger than the sampling period
+        self.Jm = 5  # moment of inertia - slows the system dynamics down - time constant must be 10 times bigger than the sampling period
         self.B = 0.01  # viscous friction
         self.Wm = 0  # output shaft's angular speed (output)
         self.Kb = 1  # electric constant
         self.y = []
+        self.x = []
         self.iterations = 30
 
     def run(self):
+        index = count()
         # motor's difference equations
-        for i in range(self.iterations):
+        # for i in range(self.iterations):
+        while(1):
             self.Tm = ((self.Km)*(self.V)-(self.Km*self.Kb*self.Wm) -
                        (self.Ra*self.Tm))*(self.T/self.La)+self.Tm
             self.Wm = (self.Tm-self.TL-(self.B*self.Wm)) * \
                 (self.T/self.Jm)+self.Wm
             # adds the speed values to an array that is used to plot the graph
             self.y.append(self.Wm)
-            sleep(0.1)
+            self.x.append(next(index)*(self.T)) #appends the sampling equivalent time to the x axis
+            #print(self.Wm)
+            sleep(self.T)
 
 
 class ControlThread (threading.Thread):
@@ -49,7 +56,6 @@ class ControlThread (threading.Thread):
     # speed it determined by reference signal
     # it can run only 12 motors at a time
 
-
 ######################################################
 # Creating the threads
 motor_thread = []
@@ -57,7 +63,7 @@ for i in range(30):
     motor_thread.append(Motor())
 
 motor_thread[0].start()
-motor_thread[0].join()
+#motor_thread[0].join()
 
 # Starting new threads
 # for i in range(29):
@@ -66,12 +72,34 @@ motor_thread[0].join()
 # for t in motor_thread:
 #    t.join()
 
+##############
+#plotting
+plt.style.use('fivethirtyeight')
+
+def animate(i):
+  x = motor_thread[0].x
+  y = motor_thread[0].y
+
+  plt.cla()
+  plt.plot(x, y, label='Motor 0')
+  plt.legend(loc='upper left')
+  plt.tight_layout()
+
+ani = FuncAnimation(plt.gcf(), animate, interval = 1)
+
+plt.tight_layout()
+plt.show()
+
+###############################
+
+
 # creating the x axis
-# creates an array from 0 to 14 spaced by intervals of 1
-x = np.arange(0, motor_thread[0].iterations, 1)
+# creates an array from 0 to the number of iterations spaced by intervals of 1
+'''x = np.arange(0, motor_thread[0].iterations, 1)
 
 # Plotting
 fig = plt.figure()
+plt.ion()
 ax = fig.subplots()
 ax.plot(x, motor_thread[0].y, color='b')
 ax.grid()
@@ -108,4 +136,4 @@ plt.show()
 # Unzipping the coord list in two different arrays
 if (coord): #only prints if there are values in "coord"
     x1, y1 = zip(*coord)
-    print(x1, y1)
+    print(x1, y1)'''
