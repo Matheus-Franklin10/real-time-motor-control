@@ -102,7 +102,7 @@ class ControlThread (threading.Thread):
                 self.currentTime = time.time()
                 self.elapsedTime = self.currentTime - self.previousTime
 
-                self.error = self.setPoint - motor_thread[i].Wm
+                self.error = self.setPoint[i] - motor_thread[i].Wm
                 self.cumError += self.error*self.elapsedTime
                 
                 self.controlSignal = self.Kp*self.error + self.Ki*self.cumError
