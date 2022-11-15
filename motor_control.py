@@ -1,15 +1,18 @@
 import random
 import threading
+import time
 from time import sleep
-import numpy as np
+#import numpy as np
 from itertools import count
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Cursor
 from matplotlib.animation import FuncAnimation
 ######################################################
 
+sem = threading.Semaphore(12)    #semaforo para doze motores simultaneos
+
 class Motor (threading.Thread):
-    def __init__(self):
+    def __init__(self, id):
         threading.Thread.__init__(self)
         # Simulation parameters
         self.T = 0.01  # sampling period
@@ -31,12 +34,17 @@ class Motor (threading.Thread):
         self.y = []
         self.x = []
         self.iterations = 3000
+        self.active = False
+        self.ini = 0
+        self.ID = id
+         
 
     def run(self):
         index = count()
         # motor's difference equations
         #for i in range(self.iterations):
         while(1):
+              
             self.Tm = ((self.Km)*(self.V)-(self.Km*self.Kb*self.Wm) -
                        (self.Ra*self.Tm))*(self.T/self.La)+self.Tm
             self.Wm = (self.Tm-self.TL-(self.B*self.Wm)) * \
@@ -48,45 +56,73 @@ class Motor (threading.Thread):
             #print(self.Wm)
             #print(self.V)
             sleep(self.T)
-
+            
+            
 
 class ControlThread (threading.Thread):
     def __init__(self):
         threading.Thread.__init__(self)
         # simulation parameters
         self.T = 0.2  # sampling time
-        self.setPoint = motor_thread[0].Wmax/2
+        self.setPoint = []
         self.controlSignal = 0
-        self.Kp = 1
+        self.Kp = 4
         self.error = 0
+        
     def run(self):
-        self.error = self.setPoint - motor_thread[0].Wm
-        self.controlSignal = self.error*self.Kp
-        motor_thread[0].V = self.controlSignal
-        print(motor_thread[0].V)
-    # not finished yet. Still need to implement "run"
+        
+        for j in range(30):
+            self.setPoint.append(0)         #cria um setpoint para cada motor
+           
+        while(1): 
+        
+            for i in range(30):
+                
+                if(motor_thread[i].active == False):         # se nao estou dentro do semaforo
+                        
+                    if (sem.acquire(blocking=False) == True):    #tento adquiri-lo. Se consigo...
+                        motor_thread[i].active = True                #digo que adquiri
+                        self.setPoint[i] = motor_thread[i].Wmax/2    #seto o setpoint 
+                        motor_thread[i].ini = time.time()            #comeco a contar o tempo
+                    else:                                            #se nao consigo adquirir o semaforo...
+                        self.setPoint[i] = 0                        #setpoint continua 0
+                        
+                elif((time.time()-motor_thread[i].ini) >= 60):     # se ja estou dentro do semaforo e ja se passaram 60 seg
+                    self.setPoint[i] = 0                           # zero setpoint
+                    motor_thread[i].active = False                 #digo q nao estou no semaforo
+                    sem.release()                                  # libero o semaforo
+   
+                
+######################################################################################                    
+                self.error = self.setPoint[i] - motor_thread[i].Wm          # 
+                self.controlSignal = self.error*self.Kp                     #    Lei de Controle
+                motor_thread[i].V = self.controlSignal                      #
+                print('Motor: ', motor_thread[i].ID, 'Velocidade: ', motor_thread[i].Wm, 'Setpoint: ', self.setPoint[i])
+######################################################################################          
+            sleep(self.T)
     # does the motors' speed control with T=200ms
-    # has a simple control law that keeps the motors working with half of the maximum speed for one minute
-    # speed it determined by reference signal
-    # it can run only 12 motors at a time
+
 
 ######################################################
 # Creating the threads
 motor_thread = []
+
 for i in range(30):
-    motor_thread.append(Motor())
+    print(i)
+    motor_thread.append(Motor(i))
+    
+print('oi1')
+# Starting new threads
+for motor in motor_thread:
+    print(motor.ID)
+    motor.start()
 
-motor_thread[0].start()
-#motor_thread[0].join()
-
+print('oi3')
 softPLC = ControlThread()
 softPLC.start()
-# Starting new threads
-# for i in range(29):
-#   motor_thread[i].start()
 
-# for t in motor_thread:
-#    t.join()
+for t in motor_thread:
+    t.join()
 
 ##############
 #plotting
