@@ -7,6 +7,8 @@ from itertools import count
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Cursor
 from matplotlib.animation import FuncAnimation
+import time
+from datetime import datetime
 ######################################################
 
 sem = threading.Semaphore(12)    #semaforo para doze motores simultaneos
@@ -25,7 +27,7 @@ class Motor (threading.Thread):
         self.Km = 1  # torque constant
         self.Tm = 0  # motor's torque current value
         self.TL = 0  # load torque (disturbance)
-        self.Jm = 5  # moment of inertia - slows the system dynamics down - time constant must be 10 times bigger than the sampling period
+        self.Jm = 1  # moment of inertia - slows the system dynamics down - time constant must be 10 times bigger than the sampling period
         self.B = 0.01  # viscous friction
         self.Wm = 0  # output shaft's angular speed (output)
         self.Kb = 1  # electric constant
@@ -66,11 +68,14 @@ class ControlThread (threading.Thread):
         self.T = 0.2  # sampling time
         self.setPoint = []
         self.controlSignal = 0
-        self.Kp = 4
+        self.Kp = 2
+        self.Ki = 1
+        self.currentTime = 0
+        self.previousTime = time.time()
+        self.elapsedTime = 0
         self.error = 0
-        
+        self.cumError = 0
     def run(self):
-        
         for j in range(30):
             self.setPoint.append(0)         #cria um setpoint para cada motor
            
@@ -94,32 +99,55 @@ class ControlThread (threading.Thread):
    
                 
 ######################################################################################                    
-                self.error = self.setPoint[i] - motor_thread[i].Wm          # 
-                self.controlSignal = self.error*self.Kp                     #    Lei de Controle
-                motor_thread[i].V = self.controlSignal                      #
-                print('Motor: ', motor_thread[i].ID, 'Velocidade: ', motor_thread[i].Wm, 'Setpoint: ', self.setPoint[i])
-######################################################################################          
-            sleep(self.T)
+                self.currentTime = time.time()
+                self.elapsedTime = self.currentTime - self.previousTime
+
+                self.error = self.setPoint - motor_thread[i].Wm
+                self.cumError += self.error*self.elapsedTime
+                
+                self.controlSignal = self.Kp*self.error + self.Ki*self.cumError
+                motor_thread[i].V = self.controlSignal
+                self.previousTime = self.currentTime
+                
+                sleep(self.T)
     # does the motors' speed control with T=200ms
 
 
+class LoggerThread (threading.Thread):
+    def __init__(self):
+        threading.Thread.__init__(self)
+    def run(self):
+        while(1):
+            try:
+                with open('log.txt', 'a') as f:
+                    for count, motorLog in enumerate(motor_thread):
+                        f.write("Motor " + str(count) + ":" + "\n\t" + "time: " + str(datetime.now()) + "\n\t" + "Wm = " + str(motorLog.Wm) + "\n")
+                        print(count)
+                    f.write("###########################################################################\n")
+            except:
+                print("Erro na escrita do arquivo")
+
+            sleep(1)
 ######################################################
 # Creating the threads
 motor_thread = []
 
 for i in range(30):
-    print(i)
+
     motor_thread.append(Motor(i))
     
-print('oi1')
+
 # Starting new threads
 for motor in motor_thread:
     print(motor.ID)
     motor.start()
 
-print('oi3')
+
 softPLC = ControlThread()
 softPLC.start()
+
+velocityLog = LoggerThread()
+velocityLog.start()
 
 for t in motor_thread:
     t.join()
