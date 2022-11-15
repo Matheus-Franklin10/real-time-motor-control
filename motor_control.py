@@ -6,6 +6,8 @@ from itertools import count
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Cursor
 from matplotlib.animation import FuncAnimation
+import time
+from datetime import datetime
 ######################################################
 
 class Motor (threading.Thread):
@@ -22,7 +24,7 @@ class Motor (threading.Thread):
         self.Km = 1  # torque constant
         self.Tm = 0  # motor's torque current value
         self.TL = 0  # load torque (disturbance)
-        self.Jm = 5  # moment of inertia - slows the system dynamics down - time constant must be 10 times bigger than the sampling period
+        self.Jm = 1  # moment of inertia - slows the system dynamics down - time constant must be 10 times bigger than the sampling period
         self.B = 0.01  # viscous friction
         self.Wm = 0  # output shaft's angular speed (output)
         self.Kb = 1  # electric constant
@@ -55,35 +57,68 @@ class ControlThread (threading.Thread):
         threading.Thread.__init__(self)
         # simulation parameters
         self.T = 0.2  # sampling time
+        #semaforo
         self.setPoint = motor_thread[0].Wmax/2
+        #conquistou
+
+        #terminou
+        #zerou o set point
+        #libera semaforo
         self.controlSignal = 0
-        self.Kp = 1
+        self.Kp = 2
+        self.Ki = 1
+        self.currentTime = 0
+        self.previousTime = time.time()
+        self.elapsedTime = 0
         self.error = 0
+        self.cumError = 0
     def run(self):
-        self.error = self.setPoint - motor_thread[0].Wm
-        self.controlSignal = self.error*self.Kp
-        motor_thread[0].V = self.controlSignal
-        print(motor_thread[0].V)
+        while(1):
+            self.currentTime = time.time()
+            self.elapsedTime = self.currentTime - self.previousTime
+
+            self.error = self.setPoint - motor_thread[0].Wm
+            self.cumError += self.error*self.elapsedTime
+            self.controlSignal = self.Kp*self.error + self.Ki*self.cumError
+            motor_thread[0].V = self.controlSignal
+            self.previousTime = self.currentTime
+            sleep(self.T)
     # not finished yet. Still need to implement "run"
     # does the motors' speed control with T=200ms
     # has a simple control law that keeps the motors working with half of the maximum speed for one minute
     # speed it determined by reference signal
     # it can run only 12 motors at a time
 
+class LoggerThread (threading.Thread):
+    def __init__(self):
+        threading.Thread.__init__(self)
+    def run(self):
+        while(1):
+            try:
+                with open('log.txt', 'a') as f:
+                    for count, motorLog in enumerate(motor_thread):
+                        f.write("Motor " + str(count) + ":" + "\n\t" + "time: " + str(datetime.now()) + "\n\t" + "Wm = " + str(motorLog.Wm) + "\n")
+                        print(count)
+                    f.write("###########################################################################\n")
+            except:
+                print("Erro na escrita do arquivo")
+
+            sleep(1)
 ######################################################
 # Creating the threads
 motor_thread = []
 for i in range(30):
     motor_thread.append(Motor())
 
-motor_thread[0].start()
-#motor_thread[0].join()
+# Starting new threads
+for motor in motor_thread:
+    motor.start()
 
 softPLC = ControlThread()
 softPLC.start()
-# Starting new threads
-# for i in range(29):
-#   motor_thread[i].start()
+
+velocityLog = LoggerThread()
+velocityLog.start()
 
 # for t in motor_thread:
 #    t.join()
