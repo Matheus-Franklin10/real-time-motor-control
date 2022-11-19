@@ -6,7 +6,7 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 import socket
-######################################################
+#####################################################
 
 #Inter Process Communication via TCP/IP
 HEADER = 64
