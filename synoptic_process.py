@@ -4,7 +4,7 @@ HEADER = 64
 PORT = 5050
 FORMAT = 'utf-8'
 DISCONNECT_MESSAGE = "!DISCONNECT"
-SERVER = "192.168.96.1"
+SERVER = "192.168.56.1"
 ADDR = (SERVER, PORT)
 
 client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -18,9 +18,13 @@ def send(msg):
     client.send(send_length)
     client.send(message)
     print(client.recv(2048).decode(FORMAT))
-for i in range(5):
-  velocity = input(f"Insira a velocidade angular do motor {i}: ")
-  send(f"Velocidade angular do motor {i} é " + velocity)
+
+'''send("Hello World!")
+input()
+send("Hello Everyone!")
+input()
+send("Hello Tim!")'''
+print(client.recv(2048).decode(FORMAT))
 
 send(DISCONNECT_MESSAGE)
 
