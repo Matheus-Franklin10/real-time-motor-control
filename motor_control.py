@@ -5,8 +5,58 @@ from time import sleep
 from datetime import datetime
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
-######################################################
+import socket
+#####################################################
 
+# Inter Process Communication via TCP/IP
+class IPC (threading.Thread):
+    def __init__(self):
+        threading.Thread.__init__(self)
+        self.HEADER = 64
+        self.PORT = 5050
+        self.SERVER = socket.gethostbyname(socket.gethostname())
+        self.ADDR = (self.SERVER, self.PORT)
+        self.FORMAT = 'utf-8'
+        self.DISCONNECT_MESSAGE = "!DISCONNECT"
+        self.connected = False
+        self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.server.bind(self.ADDR)
+        self.clientConn = 0
+    def run(self):
+        print("[STARTING] server is starting...")
+        
+        self.server.listen()
+        print(f"[LISTENING] Server is listening on {self.SERVER}")
+        while True:
+            conn, addr = self.server.accept()
+            self.clientConn = conn
+            thread = threading.Thread(target=self.handle_client, args=(conn, addr))
+            thread.start()
+            print(f"[ACTIVE CONNECTIONS] {threading.active_count() - 1}")   
+
+    def handle_client(self, conn, addr):
+        print(f"[NEW CONNECTION] {addr} connected.")
+        self.connected = True
+        while self.connected:
+            msg_length = conn.recv(self.HEADER).decode(self.FORMAT)
+            if msg_length:
+                msg_length = int(msg_length)
+                msg = conn.recv(msg_length).decode(self.FORMAT)
+                if msg == self.DISCONNECT_MESSAGE:
+                    self.connected = False
+
+                print(f"[{addr}] {msg}")
+                conn.send("Msg received".encode(self.FORMAT))
+
+        conn.close()
+
+    def send(self, msg):
+        while not self.connected:
+            pass
+        message = msg.encode(self.FORMAT)
+        self.clientConn.send(message)
+
+###############################################################################
 
 
 class Motor (threading.Thread):
@@ -27,31 +77,33 @@ class Motor (threading.Thread):
         self.B = 0.01  # viscous friction
         self.Wm = 0  # output shaft's angular speed (output)
         self.Kb = 1  # electric constant
-        self.Wmax = (self.Vmax-self.Ia*self.Ra)/self.Kb #maximum speed of the motor
-        self.setPoint = [] #setPoint vector that is used to plot the graph
+        self.Wmax = (self.Vmax-self.Ia*self.Ra) / self.Kb  # maximum speed of the motor
+        self.setPoint = []  # setPoint vector that is used to plot the graph
         self.y = []
         self.x = []
         self.active = False
         self.ini = 0
         self.ID = id
-         
 
     def run(self):
         index = count()
         # motor's difference equations
-        while(1):
-              
+        while (1):
+
             self.Tm = ((self.Km)*(self.V)-(self.Km*self.Kb*self.Wm) -
                        (self.Ra*self.Tm))*(self.T/self.La)+self.Tm
             self.Wm = (self.Tm-self.TL-(self.B*self.Wm)) * \
                 (self.T/self.Jm)+self.Wm
-           
-            self.y.append(self.Wm)   # adds the speed values to an array that is used to plot the graph
-            self.x.append(next(index)*(self.T)) #appends the sampling equivalent time to the x axis
-            self.setPoint.append(self.Wmax/2) #the setpoint vector needs to be the same size of the y vector so they can be plotted together
+
+            # adds the speed values to an array that is used to plot the graph
+            self.y.append(self.Wm)
+            # appends the sampling equivalent time to the x axis
+            self.x.append(next(index)*(self.T))
+            # the setpoint vector needs to be the same size of the y vector so they can be plotted together
+            self.setPoint.append(self.Wmax/2)
             sleep(self.T)
-            
-            
+
+
 class ControlThread (threading.Thread):
     def __init__(self):
         threading.Thread.__init__(self)
@@ -66,55 +118,73 @@ class ControlThread (threading.Thread):
         self.elapsedTime = 0
         self.cumError = 0
         self.error = 0
+
     def run(self):
         for j in range(len(motor_thread)):
-            self.setPoint.append(0)         #cria um setpoint para cada motor
-           
-        while(1): 
-            #retirei o controle integrativo por agora, pois não estava funcionando com a gestão de tempo atual
-            #self.previousTime = self.currentTime 
+            self.setPoint.append(0)  # cria um setpoint para cada motor
+
+        while (1):
+            # retirei o controle integrativo por agora, pois não estava funcionando com a gestão de tempo atual
+            #self.previousTime = self.currentTime
             #self.currentTime = time.time()
             #self.elapsedTime = self.currentTime - self.previousTime
-            #gestão dos motores energizados
+            # gestão dos motores energizados
             for i in range(len(motor_thread)):
-                if(motor_thread[i].active == False):         # se nao estou dentro do semaforo
-                    if (sem.acquire(blocking=False) == True):    #tento adquiri-lo. Se consigo...
-                        motor_thread[i].active = True                #digo que adquiri
-                        self.setPoint[i] = motor_thread[i].Wmax/2    #seto o setpoint 
-                        motor_thread[i].ini = time.time()            #comeco a contar o tempo
-                    else:                                            #se nao consigo adquirir o semaforo...
-                        self.setPoint[i] = 0                        #setpoint continua 0
-                elif((time.time()-motor_thread[i].ini) >= 60):     # se ja estou dentro do semaforo e ja se passaram 60 seg
-                    self.setPoint[i] = 0                           # zero setpoint
-                    motor_thread[i].active = False                 #digo q nao estou no semaforo
+                # se nao estou dentro do semaforo
+                if (motor_thread[i].active == False):
+                    # tento adquiri-lo. Se consigo...
+                    if (sem.acquire(blocking=False) == True):
+                        motor_thread[i].active = True  # digo que adquiri
+                        self.setPoint[i] = motor_thread[i].Wmax / \
+                            2  # seto o setpoint
+                        # comeco a contar o tempo
+                        motor_thread[i].ini = time.time()
+                    else:  # se nao consigo adquirir o semaforo...
+                        self.setPoint[i] = 0  # setpoint continua 0
+                # se ja estou dentro do semaforo e ja se passaram 60 seg
+                elif ((time.time()-motor_thread[i].ini) >= 60):
+                    # zero setpoint
+                    self.setPoint[i] = 0
+                    # digo q nao estou no semaforo
+                    motor_thread[i].active = False
                     sem.release()                                  # libero o semaforo
 
-                 
-                #Controle dos motores
+                # Controle dos motores
                 self.error = self.setPoint[i] - motor_thread[i].Wm
                 #self.cumError += self.error*self.elapsedTime
                 #self.controlSignal = self.Kp*self.error + self.Ki*self.cumError
                 self.controlSignal = self.Kp*self.error
-                motor_thread[i].V = self.controlSignal    
-                
+                motor_thread[i].V = self.controlSignal
+
             sleep(self.T)
+
 
 class LoggerThread (threading.Thread):
     def __init__(self):
         threading.Thread.__init__(self)
+
     def run(self):
-        while(1):
+        while (1):
             try:
                 with open('log.txt', 'a') as f:
-                    for count, motorLog in enumerate(motor_thread):
-                        f.write("Motor " + str(count) + ":" + "\n\t" + "time: " + str(datetime.now()) + "\n\t" + "Wm = " + str(motorLog.Wm) + "\n")
-                    f.write("###########################################################################\n")
-            except:
-                print("Erro na escrita do arquivo")
+                    for count, motor_log in enumerate(motor_thread):
+                        msg = ("Motor " + str(count) + ":" + "\n\t" + "time: " +
+                               str(datetime.now()) + "\n\t" + "Wm = " + str(motor_log.Wm) + "\n")
+                        f.write(msg)
+                        tcp_interface.send(msg)
+                    msg = "###########################################################################\n"
+                    f.write(msg)
+                    tcp_interface.send(msg)
+            except Exception as e:
+                print("Erro na escrita de log.txt: " + e)
 
             sleep(1)
 
+
 ######################################################
+# Iniciando a IPC
+tcp_interface = IPC()
+tcp_interface.start()
 # Criando as threads
 motor_thread = []
 
@@ -123,12 +193,12 @@ for i in range(30):
 
 # Iniciando novas threads
 for motor in motor_thread:
-    #print(motor.ID)
+    # print(motor.ID)
     motor.start()
 
 # Iniciando ControlThread
 softPLC = ControlThread()
-sem = threading.Semaphore(12)    #semaforo para doze motores simultaneos
+sem = threading.Semaphore(12)  # semaforo para doze motores simultaneos
 softPLC.start()
 
 # Iniciando LoggerThread
@@ -136,21 +206,23 @@ velocityLog = LoggerThread()
 velocityLog.start()
 
 ##############
-#Plotando
+# Plotando
 plt.style.use('fivethirtyeight')
 
+
 def animate(i):
-   x = motor_thread[0].x
-   y1 = motor_thread[0].y
-   y2 = motor_thread[0].setPoint
+    x = motor_thread[0].x
+    y1 = motor_thread[0].y
+    y2 = motor_thread[0].setPoint
 
-   plt.cla()
-   plt.plot(x, y1, label='Motor 0')
-   plt.plot(x, y2, label='Setpoint')
-   plt.legend(loc='upper left')
-   plt.tight_layout()
+    plt.cla()
+    plt.plot(x, y1, label='Motor 0')
+    plt.plot(x, y2, label='Setpoint')
+    plt.legend(loc='upper left')
+    plt.tight_layout()
 
-ani = FuncAnimation(plt.gcf(), animate, interval = 500)
+
+ani = FuncAnimation(plt.gcf(), animate, interval=500)
 
 plt.tight_layout()
 plt.show()
