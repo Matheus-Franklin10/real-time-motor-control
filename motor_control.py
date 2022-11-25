@@ -9,56 +9,52 @@ import socket
 #####################################################
 
 # Inter Process Communication via TCP/IP
-HEADER = 64
-PORT = 5050
-SERVER = socket.gethostbyname(socket.gethostname())
-ADDR = (SERVER, PORT)
-FORMAT = 'utf-8'
-DISCONNECT_MESSAGE = "!DISCONNECT"
+class IPC (threading.Thread):
+    def __init__(self):
+        threading.Thread.__init__(self)
+        self.HEADER = 64
+        self.PORT = 5050
+        self.SERVER = socket.gethostbyname(socket.gethostname())
+        self.ADDR = (self.SERVER, self.PORT)
+        self.FORMAT = 'utf-8'
+        self.DISCONNECT_MESSAGE = "!DISCONNECT"
+        self.connected = False
+        self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.server.bind(self.ADDR)
+        self.clientConn = 0
+    def run(self):
+        print("[STARTING] server is starting...")
+        
+        self.server.listen()
+        print(f"[LISTENING] Server is listening on {self.SERVER}")
+        while True:
+            conn, addr = self.server.accept()
+            self.clientConn = conn
+            thread = threading.Thread(target=self.handle_client, args=(conn, addr))
+            thread.start()
+            print(f"[ACTIVE CONNECTIONS] {threading.active_count() - 1}")   
 
-server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-server.bind(ADDR)
+    def handle_client(self, conn, addr):
+        print(f"[NEW CONNECTION] {addr} connected.")
+        self.connected = True
+        while self.connected:
+            msg_length = conn.recv(self.HEADER).decode(self.FORMAT)
+            if msg_length:
+                msg_length = int(msg_length)
+                msg = conn.recv(msg_length).decode(self.FORMAT)
+                if msg == self.DISCONNECT_MESSAGE:
+                    self.connected = False
 
+                print(f"[{addr}] {msg}")
+                conn.send("Msg received".encode(self.FORMAT))
 
-def handle_client(conn, addr):
-    print(f"[NEW CONNECTION] {addr} connected.")
+        conn.close()
 
-    connected = True
-    while connected:
-        msg_length = conn.recv(HEADER).decode(FORMAT)
-        if msg_length:
-            msg_length = int(msg_length)
-            msg = conn.recv(msg_length).decode(FORMAT)
-            if msg == DISCONNECT_MESSAGE:
-                connected = False
-
-            print(f"[{addr}] {msg}")
-            conn.send("Msg received".encode(FORMAT))
-
-    conn.close()
-
-def send(msg):
-    message = msg.encode(FORMAT)
-    msg_length = len(message)
-    send_length = str(msg_length).encode(FORMAT)
-    send_length += b' ' * (HEADER - len(send_length))
-    server.send(send_length)
-    server.send(message)
-    #print(server.recv(2048).decode(FORMAT))
-
-def start():
-    server.listen()
-    print(f"[LISTENING] Server is listening on {SERVER}")
-    while True:
-        conn, addr = server.accept()
-        thread = threading.Thread(target=handle_client, args=(conn, addr))
-        thread.start()
-        print(f"[ACTIVE CONNECTIONS] {threading.activeCount() - 1}")
-
-
-print("[STARTING] server is starting...")
-startCon = threading.Thread(target=start, args=())
-startCon.start()
+    def send(self, msg):
+        while not self.connected:
+            pass
+        message = msg.encode(self.FORMAT)
+        self.clientConn.send(message)
 
 ###############################################################################
 
@@ -175,17 +171,20 @@ class LoggerThread (threading.Thread):
                         msg = ("Motor " + str(count) + ":" + "\n\t" + "time: " +
                                str(datetime.now()) + "\n\t" + "Wm = " + str(motor_log.Wm) + "\n")
                         f.write(msg)
-                        #send(msg)
+                        tcp_interface.send(msg)
                     msg = "###########################################################################\n"
                     f.write(msg)
-                    #send(msg)
-            except:
-                print("Erro na escrita do arquivo")
+                    tcp_interface.send(msg)
+            except Exception as e:
+                print("Erro na escrita de log.txt: " + e)
 
             sleep(1)
 
 
 ######################################################
+# Iniciando a IPC
+tcp_interface = IPC()
+tcp_interface.start()
 # Criando as threads
 motor_thread = []
 
