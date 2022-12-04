@@ -14,7 +14,7 @@ class IPC (threading.Thread):
     def __init__(self):
         threading.Thread.__init__(self)
         self.HEADER = 64
-        self.PORT = 5050
+        self.PORT = 5051
         self.SERVER = socket.gethostbyname(socket.gethostname())
         self.ADDR = (self.SERVER, self.PORT)
         self.FORMAT = 'utf-8'
@@ -158,7 +158,10 @@ class ControlThread (threading.Thread):
 
 
     async def exec(self):
-
+        #disabled integrative controller
+        #self.previousTime = self.currentTime
+        #self.currentTime = time.time()
+        #self.elapsedTime = self.currentTime - self.previousTime
         # gestão dos motores energizados
         for i in range(len(motor_thread)):
             # se nao estou dentro do semaforo
@@ -202,23 +205,35 @@ class LoggerThread (threading.Thread):
         threading.Thread.__init__(self)
 
     def run(self):
-        while (1):
-            try:
-                with open('log.txt', 'a') as f:
-                    for count, motor_log in enumerate(motor_thread):
-                        motor_log.sem_GV.acquire()
-                        msg = ("Motor " + str(count) + ":" + "\n\t" + "time: " +
-                               str(datetime.now()) + "\n\t" + "Wm = " + str(motor_log.Wm) + "\n")
-                        f.write(msg)
-                        tcp_interface.send(msg)
-                        motor_log.sem_GV.release()
-                    msg = "###########################################################################\n"
+        asyncio.run(self.async_exec())
+      
+    async def async_exec(self):            
+        while(1):
+            task_logger_thread = asyncio.create_task(self.exec())   #dispara execução da logger thread
+            task_contador = asyncio.ensure_future(self.async_count(1))  #dispara um contador
+    
+            await task_logger_thread   #espera a logger thread terminar
+            await task_contador         #espera o contador terminar
+                    
+    async def async_count(self, quanto):
+        await asyncio.sleep(quanto) 
+
+    async def exec(self):
+        try:
+            with open('log.txt', 'a') as f:
+                for count, motor_log in enumerate(motor_thread):
+                    motor_log.sem_GV.acquire()
+                    msg = ("Motor " + str(count) + ":" + "\n\t" + "time: " +
+                            str(datetime.now()) + "\n\t" + "Wm = " + str(motor_log.Wm) + "\n")
                     f.write(msg)
                     tcp_interface.send(msg)
-            except Exception as e:
-                print("Erro na escrita de log.txt: " + e)
+                    motor_log.sem_GV.release()
+                msg = "###########################################################################\n"
+                f.write(msg)
+                tcp_interface.send(msg)
+        except Exception as e:
+            print("Erro na escrita de log.txt: " + e)
 
-            sleep(1)
 
 
 ######################################################
