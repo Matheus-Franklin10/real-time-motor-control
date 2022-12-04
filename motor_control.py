@@ -6,6 +6,7 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 import socket
+import asyncio
 #####################################################
 
 # Inter Process Communication via TCP/IP
@@ -81,27 +82,45 @@ class Motor (threading.Thread):
         self.setPoint = []  # setPoint vector that is used to plot the graph
         self.y = []
         self.x = []
-        self.active = False
-        self.ini = 0
-        self.ID = id
+        self.active = False  #flag para aquisição do semaforo sem_security
+        self.ini = 0   #variavel para contagem de tempo
+        self.ID = id  #identificação do motor
+        self.sem_GV = threading.Semaphore(1) #semaforo para exclusao mutua no acesso das inputs e outputs dos motores
+        self.index = 0
 
     def run(self):
-        index = count()
+        asyncio.run(self.async_exec())
+      
+    async def async_exec(self):
+        self.index = count() 
+                  
+        while(1):
+            task_motor_thread = asyncio.create_task(self.exec())
+            task_contador = asyncio.ensure_future(self.async_count(0.1))
+    
+            await task_motor_thread
+            await task_contador
+            
+            
+    async def async_count(self, quanto):
+        await asyncio.sleep(quanto) 
+    
+    async def exec(self):
         # motor's difference equations
-        while (1):
-
-            self.Tm = ((self.Km)*(self.V)-(self.Km*self.Kb*self.Wm) -
+            
+        self.sem_GV.acquire()    #mutex para proteção de V e Wm
+        self.Tm = ((self.Km)*(self.V)-(self.Km*self.Kb*self.Wm) -
                        (self.Ra*self.Tm))*(self.T/self.La)+self.Tm
-            self.Wm = (self.Tm-self.TL-(self.B*self.Wm)) * \
+        self.Wm = (self.Tm-self.TL-(self.B*self.Wm)) * \
                 (self.T/self.Jm)+self.Wm
-
-            # adds the speed values to an array that is used to plot the graph
-            self.y.append(self.Wm)
-            # appends the sampling equivalent time to the x axis
-            self.x.append(next(index)*(self.T))
-            # the setpoint vector needs to be the same size of the y vector so they can be plotted together
-            self.setPoint.append(self.Wmax/2)
-            sleep(self.T)
+            
+        # adds the speed values to an array that is used to plot the graph
+        self.y.append(self.Wm)
+        # appends the sampling equivalent time to the x axis
+        self.x.append(next(self.index)*(self.T))
+        # the setpoint vector needs to be the same size of the y vector so they can be plotted together
+        self.setPoint.append(self.Wmax/2)
+        self.sem_GV.release()
 
 
 class ControlThread (threading.Thread):
@@ -118,45 +137,64 @@ class ControlThread (threading.Thread):
         self.elapsedTime = 0
         self.cumError = 0
         self.error = 0
-
+        
     def run(self):
+        asyncio.run(self.async_exec())
+      
+    async def async_exec(self):
         for j in range(len(motor_thread)):
             self.setPoint.append(0)  # cria um setpoint para cada motor
+            
+        while(1):
+            task_control_thread = asyncio.create_task(self.exec())   #dispara execução da control thread
+            task_contador = asyncio.ensure_future(self.async_count(0.2))  #dispara um contador
+    
+            await task_control_thread   #espera a control thread terminar
+            await task_contador         #espera o contador terminar
+            
+            
+    async def async_count(self, quanto):
+        await asyncio.sleep(quanto)    
 
-        while (1):
-            # retirei o controle integrativo por agora, pois não estava funcionando com a gestão de tempo atual
-            #self.previousTime = self.currentTime
-            #self.currentTime = time.time()
-            #self.elapsedTime = self.currentTime - self.previousTime
-            # gestão dos motores energizados
-            for i in range(len(motor_thread)):
-                # se nao estou dentro do semaforo
-                if (motor_thread[i].active == False):
+
+    async def exec(self):
+
+        # gestão dos motores energizados
+        for i in range(len(motor_thread)):
+            # se nao estou dentro do semaforo
+            if (motor_thread[i].active == False):
+                if(motor_thread[i-1].active == False):  #garantir que dois motores em sequencia nao sejam acionados simultaneamente
                     # tento adquiri-lo. Se consigo...
-                    if (sem.acquire(blocking=False) == True):
+                    if (sem_security.acquire(blocking=False) == True):
                         motor_thread[i].active = True  # digo que adquiri
+                        motor_thread[i].sem_GV.acquire()
                         self.setPoint[i] = motor_thread[i].Wmax / \
                             2  # seto o setpoint
+                        motor_thread[i].sem_GV.release()
                         # comeco a contar o tempo
                         motor_thread[i].ini = time.time()
                     else:  # se nao consigo adquirir o semaforo...
                         self.setPoint[i] = 0  # setpoint continua 0
-                # se ja estou dentro do semaforo e ja se passaram 60 seg
-                elif ((time.time()-motor_thread[i].ini) >= 60):
-                    # zero setpoint
-                    self.setPoint[i] = 0
-                    # digo q nao estou no semaforo
-                    motor_thread[i].active = False
-                    sem.release()                                  # libero o semaforo
+            # se ja estou dentro do semaforo e ja se passaram 60 seg
+            elif ((time.time()-motor_thread[i].ini) >= 60):
+                # zero setpoint
+                self.setPoint[i] = 0
+                # digo q nao estou no semaforo
+                motor_thread[i].active = False
+                sem_security.release()                                  # libero o semaforo
 
-                # Controle dos motores
-                self.error = self.setPoint[i] - motor_thread[i].Wm
-                #self.cumError += self.error*self.elapsedTime
-                #self.controlSignal = self.Kp*self.error + self.Ki*self.cumError
-                self.controlSignal = self.Kp*self.error
-                motor_thread[i].V = self.controlSignal
+            # Controle dos motores
+            motor_thread[i].sem_GV.acquire()
+            self.error = self.setPoint[i] - motor_thread[i].Wm
+            #self.cumError += self.error*self.elapsedTime
+            #self.controlSignal = self.Kp*self.error + self.Ki*self.cumError
+            self.controlSignal = self.Kp*self.error
+            motor_thread[i].V = self.controlSignal
+            #print('Motor: ', motor_thread[i].ID, '  Velocidade: ', motor_thread[i].Wm, '  Setpoint: ', self.setPoint[i])
+            motor_thread[i].sem_GV.release()
+                
+            
 
-            sleep(self.T)
 
 
 class LoggerThread (threading.Thread):
@@ -168,10 +206,12 @@ class LoggerThread (threading.Thread):
             try:
                 with open('log.txt', 'a') as f:
                     for count, motor_log in enumerate(motor_thread):
+                        motor_log.sem_GV.acquire()
                         msg = ("Motor " + str(count) + ":" + "\n\t" + "time: " +
                                str(datetime.now()) + "\n\t" + "Wm = " + str(motor_log.Wm) + "\n")
                         f.write(msg)
                         tcp_interface.send(msg)
+                        motor_log.sem_GV.release()
                     msg = "###########################################################################\n"
                     f.write(msg)
                     tcp_interface.send(msg)
@@ -185,7 +225,8 @@ class LoggerThread (threading.Thread):
 # Iniciando a IPC
 tcp_interface = IPC()
 tcp_interface.start()
-# Criando as threads
+
+# Criando as threads dos motores
 motor_thread = []
 
 for i in range(30):
@@ -193,12 +234,13 @@ for i in range(30):
 
 # Iniciando novas threads
 for motor in motor_thread:
-    # print(motor.ID)
     motor.start()
 
 # Iniciando ControlThread
 softPLC = ControlThread()
-sem = threading.Semaphore(12)  # semaforo para doze motores simultaneos
+
+sem_security = threading.Semaphore(12)  # semaforo para doze motores simultaneos
+
 softPLC.start()
 
 # Iniciando LoggerThread
@@ -226,3 +268,4 @@ ani = FuncAnimation(plt.gcf(), animate, interval=500)
 
 plt.tight_layout()
 plt.show()
+
